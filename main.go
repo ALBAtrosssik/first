@@ -2,48 +2,57 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/gorilla/mux"
 	"net/http"
 )
-
-var task string // объявление глобальной переменной
 
 type requestBody struct {
 	Message string `json:"message"`
 } // структура которая парсит json в go
 
 func TaskHandler(w http.ResponseWriter, r *http.Request) {
-	var taskReq requestBody // переменная для хранения декодированных данных
-
+	var taskReq requestBody                         // переменная для хранения декодированных данных
 	err := json.NewDecoder(r.Body).Decode(&taskReq) // создание нового декодера который читает тело запроса
-	// метод decode парсит json и заполняет taskReq
+
 	if err != nil || taskReq.Message == "" {
 		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
-	} //проверка, если есть ошибка или пустое сообщение
+	}
+	
+	newTask := Task{Task: taskReq.Message, IsDone: false}
+	data := DB.Create(&newTask)
 
-	task = taskReq.Message
-	w.WriteHeader(http.StatusOK)                                                                  // отправляет серверу статус ок
-	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Task received"}) // отправляем json ответ
+	if data.Error != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"message": data.Error})
+	} else {
+		json.NewEncoder(w).Encode(map[string]interface{}{"message": newTask.ID})
+	}
 }
 
-func HelloHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json") // пишем для того чтобы клиент понимал что данные в формате json
+func AllHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var tasks []Task
+	result := DB.Find(&tasks)
 
-	greeting := "Hello"
-	if task != "" {
-		greeting = fmt.Sprintf("Hello, %s", task)
+	if result.Error != nil {
+		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
+		return
 	}
-	// если task не пустой отправляется приветвие с task
-	response := map[string]string{"greeting": greeting} // создаем мапу с ключем greeting
-	json.NewEncoder(w).Encode(response)                 // кодируем сообщение в json
+
+	if err := json.NewEncoder(w).Encode(tasks); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func main() {
-	router := mux.NewRouter()
-	router.HandleFunc("/api/hello", HelloHandler).Methods("GET")
-	router.HandleFunc("/api/task", TaskHandler).Methods("POST")
+	// Вызываем метод InitDB() из файла db.go
+	InitDB()
+	// Автоматическая миграция модели Task
+	DB.AutoMigrate(&Task{})
 
+	router := mux.NewRouter()
+	router.HandleFunc("/api/alltask", AllHandler).Methods("GET")
+	router.HandleFunc("/api/task", TaskHandler).Methods("POST")
 	http.ListenAndServe(":8080", router)
 }
